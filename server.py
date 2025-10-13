@@ -73,7 +73,7 @@ def load_config():
         default_config = {
             "10.36.236.121": {
                 "username": "admin",
-                "password": "Kimchi123Kimchi123!"
+                "password": "XXXX!"
             }
         }
         logger.info("Using default configuration")
