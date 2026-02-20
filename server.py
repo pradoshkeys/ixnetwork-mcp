@@ -79,6 +79,32 @@ def load_config():
         logger.info("Using default configuration")
         return default_config
 
+def parse_api_server(api_server_ip: str) -> tuple:
+    """Parse an api_server_ip string into (ip, port).
+
+    Accepts formats like '10.0.0.1', '10.0.0.1:8062', or '10.0.0.1:443'.
+    Defaults to port 443 if no port is specified.
+
+    Args:
+        api_server_ip (str): IP address with optional port.
+
+    Returns:
+        tuple: (ip_address, port) where port is an int.
+    """
+    if ':' in api_server_ip:
+        parts = api_server_ip.rsplit(':', 1)
+        ip = parts[0]
+        try:
+            port = int(parts[1])
+        except ValueError:
+            logger.warning(f"Invalid port in '{api_server_ip}', defaulting to 443")
+            ip = api_server_ip
+            port = 443
+    else:
+        ip = api_server_ip
+        port = 443
+    return ip, port
+
 # Global configuration
 CONFIG = load_config()
 DEFAULT_IP = "10.36.236.121"  # Default IxNetwork server IP
@@ -92,22 +118,24 @@ def get_credentials(ip_address=DEFAULT_IP):
     Returns:
         Tuple[str, str]: Username and password for the IP address.
     """
-    logger.info(f"Getting credentials for IP: {ip_address}")
-    if ip_address in CONFIG:
-        username = CONFIG[ip_address]["username"]
-        password = CONFIG[ip_address]["password"]
+    # Strip port if present so config lookup matches bare IP keys
+    bare_ip, _ = parse_api_server(ip_address)
+    logger.info(f"Getting credentials for IP: {bare_ip}")
+    if bare_ip in CONFIG:
+        username = CONFIG[bare_ip]["username"]
+        password = CONFIG[bare_ip]["password"]
         # Log partial password for debugging (showing only first two chars)
         masked_password = password[:2] + '*' * (len(password) - 2) if len(password) > 2 else '***'
         logger.info(f"Retrieved credentials - Username: {username}, Password: {masked_password}")
         return username, password
     
-    error_msg = f"IP address {ip_address} not found in configuration"
+    error_msg = f"IP address {bare_ip} not found in configuration"
     logger.error(error_msg)
     logger.error(f"Available IPs in config: {list(CONFIG.keys())}")
     
     # Fallback to default credentials if IP not found
     logger.info("Using default credentials")
-    return "admin", "Kimchi123Kimchi123!"
+    return "admin", "admin"
 
 
 def get_session_assistant(api_server_ip: str, session_id: Optional[str] = None, session_name: Optional[str] = None) -> SessionAssistant:
@@ -124,12 +152,13 @@ def get_session_assistant(api_server_ip: str, session_id: Optional[str] = None, 
     Raises:
         Exception: If session creation fails.
     """
-    logger.info(f"Creating session assistant - Chassis IP: {api_server_ip}, Session ID: {session_id}, Session Name: {session_name}")
-    username, password = get_credentials(ip_address=api_server_ip)
+    ip, port = parse_api_server(api_server_ip)
+    logger.info(f"Creating session assistant - Chassis IP: {ip}, Port: {port}, Session ID: {session_id}, Session Name: {session_name}")
+    username, password = get_credentials(ip_address=ip)
     try:
         session_assistant = SessionAssistant(
-            IpAddress=api_server_ip,
-            RestPort=443,
+            IpAddress=ip,
+            RestPort=port,
             UserName=username,
             Password=password,
             SessionName=session_name,
@@ -155,11 +184,12 @@ def get_sessions(api_server_ip: str) -> str:
     Returns:
         str: JSON string of session list.
     """
-    logger.info(f"Getting sessions for chassis {api_server_ip}")
-    
+    ip, port = parse_api_server(api_server_ip)
+    logger.info(f"Getting sessions for chassis {ip}:{port}")
+
     try:
-        test_platform = TestPlatform(api_server_ip, rest_port=443)
-        username, password = get_credentials(ip_address=api_server_ip)
+        test_platform = TestPlatform(ip, rest_port=port)
+        username, password = get_credentials(ip_address=ip)
         test_platform.Authenticate(username, password)
         
         session_list: List[Dict[str, str]] = []
@@ -247,7 +277,7 @@ def load_ixnetwork_config(api_server_ip: str, session_id: str, ixia_config_file:
     
     try:
         # Check if file exists
-        config_path = "/Users/ashwjosh/ixnetwork-mcp/ixia_configuration_files/" + ixia_config_file
+        config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ixia_configuration_files", ixia_config_file)
         if not os.path.exists(config_path):
             return json.dumps({"error": f"Configuration file {ixia_config_file} not found"})
             
@@ -475,13 +505,15 @@ def test_connection(api_server_ip: str) -> str:
     Returns:
         str: Connection test result in JSON format.
     """
-    logger.info(f"Testing connection to chassis {api_server_ip}")
-    
+    ip, port = parse_api_server(api_server_ip)
+    logger.info(f"Testing connection to chassis {ip}:{port}")
+
     try:
-        test_platform = TestPlatform(api_server_ip, rest_port=443, verify=False)
+        test_platform = TestPlatform(ip, rest_port=port)
         platform_type = test_platform.Platform
-        
-        test_platform.Authenticate(DEFAULT_USERNAME, DEFAULT_PASSWORD)
+
+        username, password = get_credentials(ip_address=ip)
+        test_platform.Authenticate(username, password)
         api_version = test_platform.ApiServerVersion
         
         connection_status: Dict[str, str] = {
